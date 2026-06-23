@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title> 치평중학교 교직원 연수 주문 </title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/+esm';
+
+    // ===================================================
+    // ★ 기존 Supabase 설정값 유지 ★
+    // ===================================================
+    const supabaseUrl = 'https://peoogqwjphvayngepfsn.supabase.co';
+    const supabaseKey = 'sb_publishable_a_HXX58Hxh3VHMhgdCOurw_ptSwJmSK';
+    // ===================================================
+
+    let supabase;
+    window._orders = [];
+    window._isAdminAuthenticated = false;
+
+    // ======읍천리 메뉴 데이터 (카테고리별 분류) ======
+    const menuData = {
+      "☕ 커피": {
+        "아메리카노": 3500, "카페라떼": 4000,
+        "바닐라빈라떼": 4800, "콜드브루": 4800, "콜드브루라떼": 4800, "복티샷(아샷추)": 4800
+      },
+        "🥛 라떼": {
+        "딸기밭라떼": 5900, "망고밭라떼": 5900, "멜론밭라떼": 5900, "블루베리밭라떼": 5900,
+        "쑥라떼": 4900, "미숫가루": 4700, "토피넛라떼": 4900, "밀크티라떼": 5500, "말차라떼": 4900,
+      },
+      "🍧 스무디": {
+        "한라봉에이드": 4900, "레몬에이드": 4900, "자몽에이드": 4900, "자두에이드": 4900, "ABC쥬스": 5900,
+        "청포도에이드": 4900, "매실에이드": 4900,
+      },
+      "🍵 티(TEA)": {
+        "유자티": 4000, "레몬얼그레이티": 4500, "캐모마일티": 4000, "쌍화차": 4900, "문경오미자차": 4200,
+      },
+      "🥪 토스트 (간식)": {
+        "치킨또띠아랩": 5500, "콘치즈토스트": 5500, "햄치즈토스트": 5800, "누텔라토스트": 5500,
+        "쑥쑥떡쿠키": 3900, "솔티크림깨찰빵": 3900
+      }
+    };
+
+    // 검증 및 총액 계산용 단일 객체 (1차원)
+    const menuPrices = {};
+    for (const category in menuData) {
+      for (const item in menuData[category]) {
+        menuPrices[item] = menuData[category][item];
+      }
+    }
+
+    // ====== 초기화 함수 ======
+    function initApp() {
+      populateDataList();
+      renderCategoryToggles();
+      initSupabase();
+    }
+
+    // 자동완성(Datalist) 목록 채우기
+    function populateDataList() {
+      const dataList = document.getElementById('menu-options');
+      for (const menu in menuPrices) {
+        const option = document.createElement('option');
+        option.value = menu;
+        dataList.appendChild(option);
+      }
+    }
+
+    // 카테고리 토글(접기/펴기) 렌더링
+    function renderCategoryToggles() {
+      const container = document.getElementById('category-container');
+      
+      for (const [category, items] of Object.entries(menuData)) {
+        const details = document.createElement('details');
+        details.className = "bg-gray-50 border border-gray-200 rounded-lg overflow-hidden group";
+        
+        const summary = document.createElement('summary');
+        summary.className = "cursor-pointer font-bold text-sm text-gray-800 bg-gray-100/50 px-4 py-3 hover:bg-gray-200 transition-colors list-none flex justify-between items-center";
+        summary.innerHTML = `${category} <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>`;
+        
+        const itemContainer = document.createElement('div');
+        itemContainer.className = "p-3 flex flex-wrap gap-2 bg-white border-t border-gray-200";
+        
+        for (const [itemName, price] of Object.entries(items)) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = "text-xs px-3 py-1.5 bg-green-50 text-green-800 border border-green-200 rounded-full hover:bg-green-600 hover:text-white hover:border-green-600 transition-all font-medium";
+          btn.textContent = `${itemName} (${price.toLocaleString()}원)`;
+          btn.onclick = () => {
+            document.getElementById('menuInput').value = itemName;
+            details.removeAttribute('open'); // 클릭 후 토글 닫기 옵션
+            // 시각적 피드백 효과
+            document.getElementById('menuInput').classList.add('ring-2', 'ring-green-500', 'bg-green-50');
+            setTimeout(() => {
+              document.getElementById('menuInput').classList.remove('ring-2', 'ring-green-500', 'bg-green-50');
+            }, 300);
+          };
+          itemContainer.appendChild(btn);
+        }
+        
+        details.appendChild(summary);
+        details.appendChild(itemContainer);
+        container.appendChild(details);
+      }
+    }
+
+    function initSupabase() {
+      try {
+        supabase = createClient(supabaseUrl, supabaseKey);
+        
+        // 연결 성공 시 UI 업데이트
+        document.getElementById('status-dot').className = 'w-3 h-3 rounded-full bg-green-400 animate-pulse shadow-[0_0_10px_#69f0ae]';
+        document.getElementById('status-text').textContent = '정상 작동 중 (Supabase)';
+        document.getElementById('submit-btn').disabled = false;
+        document.getElementById('submit-btn').classList.remove('bg-gray-400', 'cursor-not-allowed');
+        document.getElementById('submit-btn').classList.add('bg-green-900', 'hover:bg-green-800');
+        
+        subscribeOrders();
+      } catch (e) {
+        console.error('Supabase 초기화 오류:', e);
+        showModal('데이터베이스 설정이 올바르지 않습니다.\nHTML 파일 상단의 설정을 확인해주세요.');
+      }
+    }
+
+    async function fetchOrders() {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('timestamp', { ascending: true });
+        
+      if (error) {
+        console.error('데이터 불러오기 실패:', error);
+      } else {
+        window._orders = data;
+        renderOrderSummary(data); 
+      }
+    }
+
+    // 실시간 동기화 (Realtime)
+    function subscribeOrders() {
+      fetchOrders(); 
+      
+      supabase
+        .channel('public:orders')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, payload => {
+          fetchOrders(); 
+        })
+        .subscribe();
+    }
+
+    // ====== 개별 삭제 기능 함수 (관리자 전용) ======
+    window.deleteOrder = async function(orderId) {
+      if (!window._isAdminAuthenticated) {
+        showModal('권한이 없습니다. 관리자 로그인을 먼저 진행해주세요.');
+        return;
+      }
+      if (!confirm('정말 이 주문을 삭제하시겠습니까?')) {
+        return;
+      }
+
+      try {
+        const { error } = await supabase
+          .from('orders')
+          .delete()
+          .eq('id', orderId);
+
+        if (error) throw error;
+        showModal('주문이 성공적으로 삭제되었습니다.');
+        fetchOrders();
+      } catch (e) {
+        console.error(e);
+        showModal('삭제 중 오류가 발생했습니다.');
+      }
+    };
+
+    // ====== 전체 삭제 기능 함수 (관리자 전용) ======
+    window.deleteAllOrders = async function() {
+      if (!window._isAdminAuthenticated) {
+        showModal('권한이 없습니다. 관리자 로그인을 먼저 진행해주세요.');
+        return;
+      }
+      
+      const ordersCount = window._orders ? window._orders.length : 0;
+      if (ordersCount === 0) {
+        showModal('삭제할 주문 내역이 없습니다.');
+        return;
+      }
+
+      if (!confirm(`정말 접수된 ${ordersCount}건의 모든 주문 내역을 삭제하시겠습니까?\n★ 이 작업은 되돌릴 수 없습니다!`)) {
+        return;
+      }
+
+      const btn = document.getElementById('delete-all-btn');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '삭제 중...';
+      btn.disabled = true;
+
+      try {
+        const { error } = await supabase
+          .from('orders')
+          .delete()
+          .not('id', 'is', null); // 테이블 내 모든 데이터 조건부 삭제
+
+        if (error) throw error;
+        showModal('모든 주문 데이터가 성공적으로 초기화되었습니다.');
+        fetchOrders();
+      } catch (e) {
+        console.error(e);
+        showModal('전체 삭제 중 오류가 발생했습니다.');
+      } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }
+    };
+
+    // ====== 실시간 통계, 금액 계산 및 테이블 그리기 ======
+    function renderOrderSummary(orders) {
+      document.getElementById('order-count').textContent = orders.length;
+
+      let totalAmount = 0;
+      const menuCounts = {};
+
+      orders.forEach(o => {
+        const priceNum = parseInt(o.price.replace(/[^0-9]/g, ''), 10) || 0;
+        totalAmount += priceNum;
+
+        if (menuCounts[o.beverage_name]) {
+          menuCounts[o.beverage_name]++;
+        } else {
+          menuCounts[o.beverage_name] = 1;
+        }
+      });
+
+      document.getElementById('total-amount').textContent = totalAmount.toLocaleString('ko-KR') + '원';
+
+      const summaryContainer = document.getElementById('menu-summary-container');
+      if (orders.length === 0) {
+        summaryContainer.innerHTML = '<p class="text-gray-400 text-sm py-2">주문된 메뉴가 없습니다.</p>';
+      } else {
+        summaryContainer.innerHTML = Object.entries(menuCounts).map(([name, count]) => `
+          <div class="bg-green-50/60 border border-green-100 px-3 py-2 rounded-xl flex justify-between items-center text-sm shadow-sm">
+            <span class="font-bold text-gray-800">${name}</span>
+            <span class="font-extrabold text-green-800 bg-white border border-green-200 px-2 py-0.5 rounded-md">${count}개</span>
+          </div>
+        `).join('');
+      }
+
+      const headerRow = document.getElementById('order-table-header');
+      headerRow.innerHTML = `
+        <th class="py-2.5 px-4 font-bold text-gray-600 bg-gray-50/50 w-16">순번</th>
+        <th class="py-2.5 px-4 font-bold text-gray-600 bg-gray-50/50 w-28">성함</th>
+        <th class="py-2.5 px-4 font-bold text-gray-600 bg-gray-50/50">주문 메뉴</th>
+        <th class="py-2.5 px-4 font-bold text-gray-600 bg-gray-50/50">추가 비고</th>
+        <th class="py-2.5 px-4 font-bold text-gray-600 bg-gray-50/50 w-24">시간</th>
+        ${window._isAdminAuthenticated ? '<th class="py-2.5 px-4 font-bold text-gray-600 bg-gray-50/50 w-16 text-center">삭제</th>' : ''}
+      `;
+
+      const tbody = document.getElementById('order-table-body');
+      const colspan = window._isAdminAuthenticated ? 6 : 5;
+      
+      if (orders.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colspan}" class="py-8 text-center text-gray-400">아직 접수된 주문이 없습니다.</td></tr>`;
+        return;
+      }
+      
+      tbody.innerHTML = orders.map((o, i) => `
+        <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+          <td class="py-3 px-4 text-gray-500 font-medium">${i + 1}</td>
+          <td class="py-3 px-4 font-bold text-gray-900">${o.teacher_name}</td>
+          <td class="py-3 px-4 text-green-900 font-medium">${o.beverage_name}</td>
+          <td class="py-3 px-4 text-gray-600">${o.memo || '-'}</td>
+          <td class="py-3 px-4 text-gray-400 text-sm">${new Date(o.timestamp).toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'})}</td>
+          ${window._isAdminAuthenticated ? `
+            <td class="py-3 px-4 text-center">
+              <button type="button" onclick="deleteOrder('${o.id}')" class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="주문 삭제">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </td>
+          ` : ''}
+        </tr>
+      `).join('');
+    }
+
+    // ====== 주문 제출 함수 ======
+    window.submitOrder = async function() {
+      const teacherName = document.getElementById('teacherName').value.trim();
+      const menuInput = document.getElementById('menuInput').value.trim();
+      const memo = document.getElementById('additionalMemo').value.trim();
+
+      if (!teacherName) { showModal('성함을 정확하게 입력해 주세요.'); return; }
+      if (!menuInput) { showModal('메뉴를 입력하거나 선택해 주세요.'); return; }
+      if (!supabase) { showModal('데이터베이스 연결 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+
+      // 가격 계산 및 6,000원 제한 검증
+      const priceValue = menuPrices[menuInput];
+      if (priceValue === undefined) {
+        showModal('정확한 총액 계산을 위해, 하단 목록에서 버튼을 누르시거나\n자동완성 목록에 나오는 정확한 메뉴명을 입력해 주세요.\n(HOT/ICE, 디카페인 등은 아래 메모칸에 적어주세요.)');
+        return;
+      }
+      if (priceValue > 6000) {
+        showModal('선택하신 메뉴는 6,000원을 초과합니다.\n6,000원 이하의 메뉴로 선택해 주세요.');
+        return;
+      }
+
+      const formattedPrice = priceValue.toLocaleString('ko-KR') + '원';
+
+      const isAlreadyOrdered = window._orders.some(o => o.teacher_name === teacherName);
+      if (isAlreadyOrdered) {
+        if (!confirm(`[${teacherName}] 선생님의 기존 주문 내역이 이미 존재합니다.\n새로운 주문으로 변경(덮어쓰기)하시겠습니까?`)) {
+          return;
+        }
+      }
+
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.innerHTML = `<svg class="animate-spin w-6 h-6 mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>주문 전송 중...`;
+
+      try {
+        const { error } = await supabase
+          .from('orders')
+          .upsert([
+            {
+              teacher_name: teacherName,
+              beverage_name: menuInput,
+              price: formattedPrice,
+              memo: memo || '',
+              timestamp: Date.now()
+            }
+          ], { onConflict: 'teacher_name' });
+          
+        if (error) throw error;
+
+        showModal(`[${teacherName}] 선생님,\n[${menuInput}] 주문이 성공적으로 저장되었습니다!`);
+        document.getElementById('teacherName').value = '';
+        document.getElementById('menuInput').value = '';
+        document.getElementById('additionalMemo').value = '';
+      } catch (e) {
+        showModal('주문 전송 중 오류가 발생했습니다. 다시 시도해 주세요.');
+        console.error(e);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<span>주문 제출하기</span><svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>`;
+      }
+    };
+
+    window.downloadCSV = function() {
+      const orders = window._orders || [];
+      if (orders.length === 0) { showModal('다운로드할 주문 내역이 없습니다.'); return; }
+
+      let csvContent = "\uFEFF"; 
+      csvContent += "순번,교직원 성함,주문 메뉴,추가 메모,주문 시간\n";
+
+      orders.forEach((o, i) => {
+        const timeStr = new Date(o.timestamp).toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'});
+        const teacherName = (o.teacher_name || '').replace(/"/g, '""');
+        const beverageName = (o.beverage_name || '').replace(/"/g, '""');
+        const memo = (o.memo || '-').replace(/"/g, '""');
+        
+        csvContent += `${i + 1},"${teacherName}","${beverageName}","${memo}","${timeStr}"\n`;
+      });
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `치평중_주문현황_${new Date().toLocaleDateString('ko-KR').replace(/ /g, '')}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    // ====== 관리자 로그인 ======
+    window.openAdminPage = function() {
+      if (window._isAdminAuthenticated) {
+        window._isAdminAuthenticated = false;
+        document.getElementById('admin-btn-text').textContent = '관리자 로그인';
+        document.getElementById('delete-all-btn').classList.add('hidden'); // 로그아웃 시 전체삭제 버튼 숨김
+        renderOrderSummary(window._orders);
+        showModal('관리자 모드가 해제되었습니다.');
+      } else {
+        document.getElementById('admin-login-modal').classList.add('open');
+        setTimeout(() => document.getElementById('admin-password').focus(), 100);
+      }
+    }
+    window.closeAdminLogin = function() {
+      document.getElementById('admin-login-modal').classList.remove('open');
+      document.getElementById('admin-password').value = '';
+    }
+    window.handleAdminLogin = function() {
+      const pw = document.getElementById('admin-password').value;
+      if (pw === '2026') { 
+        window._isAdminAuthenticated = true;
+        window.closeAdminLogin();
+        document.getElementById('admin-btn-text').textContent = '관리자 로그아웃';
+        document.getElementById('delete-all-btn').classList.remove('hidden'); // 로그인 성공 시 전체삭제 버튼 표시
+        renderOrderSummary(window._orders);
+        showModal('관리자 인증에 성공했습니다.\n현황판에서 [휴지통 아이콘]으로 개별 삭제를 하거나,\n[🗑️ 전체 삭제] 버튼으로 전체 내역을 비울 수 있습니다.');
+      } else {
+        showModal('비밀번호가 일치하지 않습니다.');
+        document.getElementById('admin-password').value = '';
+      }
+    }
+
+    function showModal(msg) {
+      document.getElementById('modal-message').textContent = msg;
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+    window.closeModal = function() {
+      document.getElementById('modal-overlay').classList.remove('open');
+    }
+
+    document.addEventListener('DOMContentLoaded', initApp);
+  </script>
+
+  <style>
+    body { font-family: 'Noto Sans KR', sans-serif; }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    .animate-spin { animation: spin 1s linear infinite; }
+    @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+    #modal-overlay { display: none; }
+    #modal-overlay.open { display: flex; }
+    #admin-login-modal { display: none; }
+    #admin-login-modal.open { display: flex; }
+    details > summary { list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+  </style>
+</head>
+
+<body class="bg-gray-50">
+
+<div id="modal-overlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-[100] p-4">
+  <div class="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center border-t-4 border-green-900">
+    <div class="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-green-900" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+    </div>
+    <h3 id="modal-message" class="text-lg font-bold text-gray-900 mb-2 whitespace-pre-wrap"></h3>
+    <button onclick="closeModal()" class="mt-6 w-full bg-green-900 text-white py-3 rounded-lg font-bold hover:bg-green-800 transition-colors">확인</button>
+  </div>
+</div>
+
+<div id="admin-login-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl">
+    <div class="flex justify-between items-center mb-6">
+      <h3 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-green-900" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        관리자 인증
+      </h3>
+      <button onclick="closeAdminLogin()" class="text-gray-400 hover:text-gray-600">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="mb-6">
+      <label class="block text-sm font-bold text-gray-700 mb-2">비밀번호 입력</label>
+      <input type="password" id="admin-password" placeholder="비밀번호를 입력하세요"
+        class="w-full border border-gray-300 rounded-lg py-3 px-4 focus:border-green-900 focus:ring-1 focus:outline-none"
+        onkeydown="if(event.key==='Enter') handleAdminLogin()" />
+    </div>
+    <button onclick="handleAdminLogin()" class="w-full bg-green-900 text-white py-3 rounded-lg font-bold hover:bg-green-800 transition-colors">
+      인증하기
+    </button>
+  </div>
+</div>
+
+<div class="flex flex-col md:flex-row min-h-screen">
+  <aside class="w-full md:w-1/3 lg:w-1/4 bg-green-900 text-green-200 p-8 flex flex-col justify-between shadow-xl">
+    <div>
+      <h1 class="text-sm font-bold tracking-widest mb-4 opacity-90 text-amber-200">TEACHER WORKSHOP ORDER KIT</h1>
+      <div class="text-5xl md:text-6xl font-extrabold text-white mb-4 tracking-tight leading-tight select-none">
+        치평중학교<br />
+        <span class="text-amber-300 text-4xl md:text-5xl tracking-normal border-b-4 border-amber-300/50 pb-1 mt-1 inline-block">MENU</span>
+      </div>
+      <p class="text-base text-white/95 mt-10 font-medium leading-relaxed italic antialiased select-none">
+        지친하루,<br />
+        선생님들을 위한 여유로운 한 잔 🥤
+      </p>
+    </div>
+    <div class="mt-12 md:mt-0">
+      <div class="flex items-center justify-between text-sm font-bold mb-2 border-b border-green-200/30 pb-2">
+        <span>STATUS</span>
+        <span>데이터베이스 실시간 연동</span>
+      </div>
+      <div class="bg-green-800 rounded-xl p-4 flex items-center justify-between shadow-inner">
+        <div>
+          <div class="font-bold text-white">주문 시스템 상태</div>
+          <div id="status-text" class="text-xs text-green-200 mt-1">서버 연결 중...</div>
+        </div>
+        <div id="status-dot" class="w-3 h-3 rounded-full bg-red-400"></div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="flex-1 p-8 lg:p-12 overflow-y-auto">
+    <div class="max-w-3xl mx-auto">
+
+      <div class="flex justify-end mb-4">
+        <button onclick="openAdminPage()"
+          class="flex items-center space-x-2 border border-gray-300 rounded-full px-4 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 hover:border-green-900 hover:text-green-900 transition-colors shadow-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          <span id="admin-btn-text">관리자 로그인</span>
+        </button>
+      </div>
+
+      <div class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+        <div>
+          <h2 class="text-sm font-bold text-green-800 tracking-widest mb-2">DIRECT ORDERING MODE</h2>
+          <h1 class="text-4xl font-extrabold text-gray-900 mb-2">주문서 작성</h1>
+          <p class="text-gray-600">직접 입력하시거나, 아래 메뉴 목록에서 눌러서 쉽게 주문하세요.</p>
+        </div>
+        <a href="https://naver.me/GfrB3nZY" target="_blank" rel="noopener noreferrer"
+          class="flex items-center space-x-2 text-sm font-bold text-green-900 bg-white border border-green-900 px-4 py-2 rounded-full hover:bg-green-900 hover:text-white transition-colors w-fit shrink-0">
+          <span>읍천리 382 메뉴판 보기</span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
+      </div>
+
+      <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200 mb-8 flex flex-col gap-6">
+        <div>
+          <label for="teacherName" class="block text-sm font-bold text-green-900 mb-2">👤 선생님 성함 <span class="text-red-500">*</span></label>
+          <input type="text" id="teacherName" placeholder="예: 홍길동" autocomplete="off"
+            class="w-full border border-gray-300 rounded-lg py-3 px-4 focus:border-green-900 focus:ring-1 focus:ring-green-900 focus:outline-none bg-gray-50 focus:bg-white transition-colors" />
+        </div>
+        
+        <div>
+          <label for="menuInput" class="block text-sm font-bold text-green-900 mb-2">🥤 주문 메뉴 (6,000원 이하) <span class="text-red-500">*</span></label>
+          <p class="text-xs text-gray-500 mb-2">타이핑하여 입력하거나, <b>아래 카테고리를 눌러 메뉴 버튼을 클릭</b>하세요.</p>
+          
+          <input type="text" id="menuInput" list="menu-options" placeholder="예: 카페라떼" autocomplete="off"
+            class="w-full border border-gray-300 rounded-lg py-3 px-4 focus:border-green-900 focus:ring-1 focus:ring-green-900 focus:outline-none bg-gray-50 focus:bg-white transition-colors" />
+          <datalist id="menu-options">
+            </datalist>
+
+          <div id="category-container" class="space-y-2 mt-4">
+            </div>
+        </div>
+
+        <div>
+          <label for="additionalMemo" class="block text-sm font-bold text-green-900 mb-2">💬 추가 요청사항 (HOT/ICE, 디카페인, 시럽 등)</label>
+          <input type="text" id="additionalMemo" placeholder="예: 아이스로 주세요, 디카페인 변경, 2층 교무실 배달" autocomplete="off"
+            class="w-full border border-gray-300 rounded-lg py-3 px-4 focus:border-green-900 focus:ring-1 focus:ring-green-900 focus:outline-none bg-gray-50 focus:bg-white transition-colors text-sm" />
+        </div>
+      </div>
+
+      <button id="submit-btn" onclick="submitOrder()" disabled
+        class="w-full text-white text-lg font-bold py-5 rounded-xl transition-all flex items-center justify-center shadow-lg bg-gray-400 cursor-not-allowed mb-12 hover:-translate-y-0.5 active:translate-y-0">
+        <span>주문 제출하기</span>
+        <svg xmlns="http://www.w3.org/2000/xl" class="w-6 h-6 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </button>
+
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col overflow-hidden mb-12">
+        <div class="bg-green-900 p-5 text-white flex justify-between items-center flex-wrap gap-3">
+          <div>
+            <h2 class="text-xl font-bold flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10a2 2 0 01-2 2h-2a2 2 0 01-2-2zm0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              📊 실시간 주문 현황판
+            </h2>
+            <p class="text-green-200 text-xs mt-1">전체 주문 내역 및 금액이 실시간으로 합산됩니다.</p>
+          </div>
+          
+          <div class="flex gap-2">
+            <button id="delete-all-btn" onclick="deleteAllOrders()" class="hidden bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-xl text-xs transition-colors shadow-sm whitespace-nowrap">
+              🗑️ 전체 삭제
+            </button>
+            <button onclick="downloadCSV()" class="bg-white/10 hover:bg-white/20 text-white font-bold py-2 px-4 rounded-xl text-xs transition-colors shadow-sm whitespace-nowrap">
+              엑셀 다운로드
+            </button>
+          </div>
+        </div>
+
+        <div class="p-5 bg-gray-50 border-b border-gray-200 flex gap-4">
+          <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex-1">
+            <div class="text-xs text-gray-500 font-bold mb-1">총 주문 수량</div>
+            <div class="text-2xl font-extrabold text-green-900"><span id="order-count">0</span><span class="text-sm text-gray-600 font-medium ml-1">잔</span></div>
+          </div>
+          <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex-1">
+            <div class="text-xs text-gray-500 font-bold mb-1">예상 총 결제 금액</div>
+            <div class="text-2xl font-extrabold text-green-900"><span id="total-amount">0원</span></div>
+          </div>
+        </div>
+
+        <div class="p-5 border-b border-gray-100">
+          <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📋 메뉴별 집계 현황</h3>
+          <div id="menu-summary-container" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            </div>
+        </div>
+
+        <div class="p-5 overflow-x-auto">
+          <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">👤 주문 교직원 명단</h3>
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr id="order-table-header" class="border-b-2 border-gray-200 text-sm">
+              </tr>
+            </thead>
+            <tbody id="order-table-body" class="text-sm">
+              <tr><td colspan="5" class="py-8 text-center text-gray-400">아직 접수된 주문이 없습니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="mt-12 text-center text-xs text-gray-400">
+        <p>치평중학교 연수 주문 시스템 + POWERED BY SUPABASE</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>
